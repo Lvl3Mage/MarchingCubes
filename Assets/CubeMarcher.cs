@@ -1,48 +1,122 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
-public class MarchingCubes : MonoBehaviour
+[RequireComponent(typeof(MeshFilter))]
+[RequireComponent(typeof(MeshCollider))]
+public class CubeMarcher : MonoBehaviour
 {
-	[SerializeField] MeshFilter meshFilter;
-	[SerializeField] MeshCollider meshCollider;
-	[SerializeField] float surfaceLevel;
-	[SerializeField] int gridSize;
-	[SerializeField] float gridScale = 1f;
-	[SerializeField] float scale;
-	float[][][] data;
-	void Start()
+	MeshFilter meshFilter;
+	MeshCollider meshCollider;
+	// [SerializeField] float vertexMergeDistance = 0.02f;
+	void Awake()
 	{
-		data = new float[gridSize][][];
-		for (int i = 0; i < data.Length; i++){
-			data[i] = new float[gridSize][];
-			for(int j = 0; j < data[i].Length; j++){
-				data[i][j] = new float[gridSize];
-				for(int k = 0; k < data[i][j].Length; k++){
-					data[i][j][k] = 0.5f* Mathf.Clamp01(i*j*k) * Mathf.Clamp01((gridSize-1-i)*(gridSize-1-j)*(gridSize-1-k));//Mathf.PerlinNoise(i*scale,j*scale)*Mathf.PerlinNoise(i*scale,k*scale) * Mathf.Clamp01(i*j*k) * Mathf.Clamp01((gridSize-1-i)*(gridSize-1-j)*(gridSize-1-k));
+		meshFilter = GetComponent<MeshFilter>();
+		meshCollider = GetComponent<MeshCollider>();
+	}
+	public void March(float[][][] data, float surfaceLevel, float scale){
+		ComputeMesh(data, surfaceLevel, scale);
+	}
+	// public Vector3 WorldPosToDataPos(Vector3 pos){
+	// 	Vector3 relativePos = pos - transform.position;
+	// 	relativePos /= gridScale;
+	// 	return relativePos;
+	// }
+	void ComputeMesh(float [][][] data, float surfaceLevel, float scale){
+		List<Vector3> vertices = new List<Vector3>();
+		List<int> triangles = new List<int>();
+		for(int i = 0; i < data.Length-1; i++){
+			for(int j = 0; j < data[i].Length-1; j++){
+				for(int k = 0; k < data[i][j].Length-1; k++){
+					ComputeCube(i,j,k, data, surfaceLevel, scale, vertices, triangles);					
 				}
 			}
+
 		}
-		ComputeMesh();
+		// vertices = RemoveVertexDuplicates(vertices, triangles);
+		meshFilter.mesh.Clear();
+		meshFilter.mesh.vertices = vertices.ToArray();
+		meshFilter.mesh.triangles = triangles.ToArray();
+		meshFilter.mesh.RecalculateNormals();
+		meshCollider.sharedMesh = meshFilter.mesh;
 	}
-	public void SetData(float[][][] newData){
-		data = newData;
-		ComputeMesh();
+
+	void ComputeCube(int x, int y, int z, float[][][] data, float surfaceLevel, float scale, List<Vector3> verts, List<int> tris){
+		int config = GetCubeConfig(x,y,z, data, surfaceLevel);
+		if(config == 0 || config == 255){ // Empty configs
+			return;
+		}
+		int[] cubeTris = triTable[config];
+		for(int i = 0; i < cubeTris.Length; i+=3){
+			if(cubeTris[i]<0){
+				continue;
+			}
+			int curVertIndex = verts.Count;
+			verts.Add(ComputeEdgePosition(x,y,z, edges[cubeTris[i]], data, surfaceLevel, scale));
+			tris.Add(curVertIndex);
+			verts.Add(ComputeEdgePosition(x,y,z, edges[cubeTris[i+1]], data, surfaceLevel, scale));
+			tris.Add(curVertIndex+1);
+			verts.Add(ComputeEdgePosition(x,y,z, edges[cubeTris[i+2]], data, surfaceLevel, scale));
+			tris.Add(curVertIndex+2);			
+		}		
 	}
-	public float[][][] GetData(){
-		return data;
+
+	int GetCubeConfig(int x, int y, int z, float[][][] data, float surfaceLevel){
+		int conf = 0;
+		for(int i = cubeOffsets.Length-1; i >= 0; i--){
+			conf = conf << 1;
+			int3 cubeOffset = cubeOffsets[i];
+			if(data[x+cubeOffset.x][y+cubeOffset.y][z+cubeOffset.z] > surfaceLevel){
+				conf += 1;
+			}
+		}
+		return conf;
 	}
-	public void UpdateMesh(){
-		ComputeMesh();
+
+	Vector3 ComputeEdgePosition(int x, int y, int z, Edge edge, float[][][] data, float surfaceLevel, float scale){
+		int3 offsetA = cubeOffsets[edge.idA];
+		int3 offsetB = cubeOffsets[edge.idB];
+		float valA = data[x + offsetA.x][y + offsetA.y][z + offsetA.z];
+		float valB = data[x + offsetB.x][y + offsetB.y][z + offsetB.z];
+		float t = Mathf.InverseLerp(valA, valB, surfaceLevel);
+		return Vector3.Lerp(GetVertexWorldPos(x,y,z,cubeOffsets[edge.idA], scale),GetVertexWorldPos(x,y,z,cubeOffsets[edge.idB], scale),t);
 	}
-	public Vector3 WorldPosToDataPos(Vector3 pos){
-		Vector3 relativePos = pos - transform.position;
-		relativePos /= gridScale;
-		return relativePos;
+	Vector3 GetVertexWorldPos(int x, int y, int z, int3 vertexRelativePos, float scale){
+		return new Vector3(x + vertexRelativePos.x, y + vertexRelativePos.y, z + vertexRelativePos.z)*scale;
 	}
-	public float GetGridScale(){
-		return gridScale;
-	}
+
+
+	//Duplicate removal
+	//returns the clean vertices and mutates the triangles list
+		//  List<Vector3> RemoveVertexDuplicates(List<Vector3> vertices, List<int> triangles){
+		// 	Dictionary<(int, int, int), int> vertDict = new Dictionary<(int, int, int), int>{};
+			
+		// 	List<Vector3> cleanVertices = new List<Vector3>();
+
+		// 	float precision = 1/vertexMergeDistance;
+
+		// 	for(int i = 0; i < vertices.Count; i++){
+		// 		Vector3 vertex = vertices[i];
+		// 		(int,int,int) roundedPosition = (Mathf.RoundToInt(vertex.x*precision),Mathf.RoundToInt(vertex.y*precision),Mathf.RoundToInt(vertex.z*precision));
+				
+		// 		int newVertexIndex;
+		// 		if(vertDict.ContainsKey(roundedPosition)){
+		// 			newVertexIndex = vertDict[roundedPosition];
+		// 		}
+		// 		else{
+		// 			cleanVertices.Add(vertex);
+		// 			newVertexIndex = cleanVertices.Count - 1;
+		// 			vertDict.Add(roundedPosition, newVertexIndex);
+		// 		}
+		// 		for(int j = 0; j < triangles.Count; j++){
+		// 			if(triangles[j] == i){
+		// 				triangles[j] = newVertexIndex;
+		// 			}
+		// 		}
+		// 	}
+		// 	return cleanVertices;
+		// }
+	//
+
 	struct int3
 	{
 		public int3(int _x, int _y, int _z){
@@ -52,7 +126,7 @@ public class MarchingCubes : MonoBehaviour
 		}
 		public int x, y, z;
 	}
-	int3[] cubeOffsets = new int3[]{
+	static readonly int3[] cubeOffsets = new int3[]{
 		new int3(0,0,0),new int3(1,0,0),new int3(1,0,1),new int3(0,0,1),
 		new int3(0,1,0),new int3(1,1,0),new int3(1,1,1),new int3(0,1,1),
 	};
@@ -64,84 +138,12 @@ public class MarchingCubes : MonoBehaviour
 		}
 		public int idA, idB;
 	}
-	Edge[] edges = new Edge[]{
+	static readonly Edge[] edges = new Edge[]{
 		new Edge(0,1), new Edge(1,2), new Edge(2,3), new Edge(3,0), 
 		new Edge(4,5), new Edge(5,6), new Edge(6,7), new Edge(7,4),
 		new Edge(0,4), new Edge(1,5), new Edge(2,6),new Edge(3,7),
 	};
-	void ComputeMesh(){
-		List<Vector3> vertices = new List<Vector3>();
-		List<int> triangles = new List<int>();
-		for(int i = 0; i < data.Length-1; i++){
-			for(int j = 0; j < data[i].Length-1; j++){
-				for(int k = 0; k < data[i][j].Length-1; k++){
-					ComputeCube(i,j,k, vertices, triangles);					
-				}
-			}
-
-		}
-		meshFilter.mesh.Clear();
-		meshFilter.mesh.vertices = vertices.ToArray();
-		meshFilter.mesh.triangles = triangles.ToArray();
-		meshFilter.mesh.RecalculateNormals();
-		meshCollider.sharedMesh = meshFilter.mesh;
-	}
-	void ComputeCube(int x, int y, int z, List<Vector3> verts, List<int> tris){
-		int conf = 0;
-
-		for(int i = cubeOffsets.Length-1; i >= 0; i--){
-			conf = conf << 1;
-			int3 cubeOffset = cubeOffsets[i];
-			if(data[x+cubeOffset.x][y+cubeOffset.y][z+cubeOffset.z] > surfaceLevel){
-				conf += 1;
-			}
-		}
-		
-		int[] cubeTris = triTable[conf];
-
-		Vector3 cubePosition = new Vector3(x,y,z);
-		for(int i = 0; i < cubeTris.Length; i+=3){
-			if(cubeTris[i]<0){
-				continue;
-			}
-			int curVertIndex = verts.Count;
-			verts.Add(ComputeEdgePosition(x,y,z,edges[cubeTris[i]]));
-			tris.Add(curVertIndex);
-			verts.Add(ComputeEdgePosition(x,y,z,edges[cubeTris[i+1]]));
-			tris.Add(curVertIndex+1);
-			verts.Add(ComputeEdgePosition(x,y,z,edges[cubeTris[i+2]]));
-			tris.Add(curVertIndex+2);			
-		}		
-	}
-	Vector3 ComputeEdgePosition(int x, int y, int z, Edge edge){
-		int3 offsetA = cubeOffsets[edge.idA];
-		int3 offsetB = cubeOffsets[edge.idB];
-		float valA = data[x + offsetA.x][y + offsetA.y][z + offsetA.z];
-		float valB = data[x + offsetB.x][y + offsetB.y][z + offsetB.z];
-		float t = Mathf.InverseLerp(valA, valB, surfaceLevel);
-		return Vector3.Lerp(GetVertexWorldPos(x,y,z,cubeOffsets[edge.idA]),GetVertexWorldPos(x,y,z,cubeOffsets[edge.idB]),t);
-	}
-	Vector3 GetVertexWorldPos(int x, int y, int z, int3 cubeOffset){
-		return new Vector3(x + cubeOffset.x, y + cubeOffset.y, z + cubeOffset.z)*gridScale;
-	}
-	// void DebugPoints(){
-	// 	for (int i = 0; i < data.Length; i++){
-	// 		for(int j = 0; j < data[i].Length; j++){
-	// 			for(int k = 0; k < data[i][j].Length; k++){
-	// 				DebugPoint(i,j,k);
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// void DebugPoint(int x, int y, int z){
-	// 	float alpha = data[x][y][z];
-	// 	Gizmos.color = new Color(data[x][y][z],0,0,alpha);
-	// 	Gizmos.DrawSphere(new Vector3(x,y,z), 0.2f);
-	// }
-	// void OnDrawGizmos(){
-	// 	DebugPoints();
-	// }
-	int[][] triTable = new int[][]{
+	static readonly int[][] triTable = new int[][]{
 		new int[]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 		new int[]{0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 		new int[]{0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},

@@ -9,7 +9,7 @@ Shader "Custom/meshShader"
     }
     SubShader
     {
-        Cull Off
+        // Cull Off
         Tags { "RenderType"="Opaque" }
         LOD 200
 
