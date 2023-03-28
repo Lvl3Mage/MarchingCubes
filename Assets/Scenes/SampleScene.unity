@@ -408,7 +408,7 @@ MonoBehaviour:
   ProximityHarshness: 2
   maxCaveDepth: 5
   surfaceLevel: 0
-  renderDistance: 7
+  renderDistance: 12
   chunkPrefab: {fileID: 7902254220333227730, guid: a6c018c539506cd4dbe447cf6cce0ee9, type: 3}
   trackedObject: {fileID: 963194228}
 --- !u!4 &328021132

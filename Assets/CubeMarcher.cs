@@ -16,11 +16,6 @@ public class CubeMarcher : MonoBehaviour
 	public void March(float[][][] data, float surfaceLevel, float scale){
 		ComputeMesh(data, surfaceLevel, scale);
 	}
-	// public Vector3 WorldPosToDataPos(Vector3 pos){
-	// 	Vector3 relativePos = pos - transform.position;
-	// 	relativePos /= gridScale;
-	// 	return relativePos;
-	// }
 	void ComputeMesh(float [][][] data, float surfaceLevel, float scale){
 		List<Vector3> vertices = new List<Vector3>();
 		List<int> triangles = new List<int>();
